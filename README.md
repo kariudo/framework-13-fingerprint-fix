@@ -18,32 +18,32 @@ Fill it with the following:
 
 ```sh
 #!/bin/sh
-# Rebinds the USB controller 0000:c1:00.4 after resume
-# to restore Goodix fingerprint reader's availability.
+# Rebind USB controller 0000:c1:00.4 after resume to restore Goodix fingerprint reader.
 
 PCI_FUNC="0000:c1:00.4"
 GOODIX_ID="27c6:609c"
 DRIVER_PATH="/sys/bus/pci/drivers/xhci_hcd"
-
-case "$1" in
-post)
-  # Give the system a moment to resume normally
+logger -t fp-rebind "Running after wake script for Goodix fingerprint reader"
+logger -t fp-rebind "Checking PCI function $PCI_FUNC for Goodix device ID $GOODIX_ID"
+# Give the system a moment to resume normally
+sleep 2
+# Check if the fingerprint reader is missing
+if ! lsusb -d "$GOODIX_ID" >/dev/null 2>&1; then
+  logger -t fp-rebind "Goodix missing after resume, resetting xHCI controller $PCI_FUNC"
+  # Unbind and rebind only that PCI function
+  echo "$PCI_FUNC" >"$DRIVER_PATH/unbind"
+  sleep 1
+  echo "$PCI_FUNC" >"$DRIVER_PATH/bind"
   sleep 2
-
-  # Check if the fingerprint reader is missing
-  if ! lsusb -d "$GOODIX_ID" >/dev/null 2>&1; then
-    logger -t fp-rebind "Goodix missing after resume, resetting xHCI controller $PCI_FUNC"
-    # Unbind and rebind only that PCI function
-    echo "$PCI_FUNC" >"$DRIVER_PATH/unbind"
-    sleep 1
-    echo "$PCI_FUNC" >"$DRIVER_PATH/bind"
-    sleep 2
-    # Restart fprintd so it picks up the reader again
-    systemctl try-restart fprintd.service
-  fi
-  ;;
-esac
+  # Restart fprintd so it picks up the reader again
+  systemctl try-restart fprintd.service
+else
+  logger -t fp-rebind "Fingerprint sensor appears available on the PCI bus, nothing to do."
+fi
 ```
+
+Don't forget it needs to be executable:
+
 ```sh
 # Make the script executable
 > sudo chmod +x /etc/local/bin/run-after-wake-for-fprint.sh
@@ -60,14 +60,17 @@ Give it the following content:
 ```conf
 [Unit]
 Description=Run custom script after resume to restart fingerprint sensor
-After=suspend.target
+After=sleep.target
+Wants=sleep.target
 
 [Service]
 Type=oneshot
 ExecStart=/etc/local/bin/run-after-wake-for-fprint.sh
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=suspend.target
+WantedBy=sleep.target
 ```
 
 ### Start the service
